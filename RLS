@@ -1,0 +1,91 @@
+%% preprocessing
+clear all
+clc
+load ECG_database
+ECG_clean=ECG_normalize(Data1);%normalize ECG data to (0,1)
+N_noise=ECG_normalize(EMN_data);
+index=1:LENGTH;
+figure(1)
+plot(index,ECG_clean)
+title('Clean ECG')
+xlabel('samples index')
+ylabel('Amplitude(mV)')
+ECG_noisy=ECG_clean+2*N_noise;
+%  ECG_noisy=awgn(ECG_clean,-10,'measured');
+snr_pre=snr(ECG_clean,ECG_noisy-ECG_clean)
+figure(2)
+plot(index,ECG_noisy)
+title('noisy ECG')
+xlabel('samples index')
+ylabel('Amplitude(mV)')
+
+%% RLS
+%% Windowing
+Fs = 16000;                          % sampling frequency 
+wlen = 0.020;                        % length of short time frame 
+L = wlen*Fs;                         % window Length
+overlap = 0.5;                       % 50% window overlapping 
+noverlap = overlap*L;    
+K = 512; % FFT length
+nframe=ceil((LENGTH-noverlap)/(L-noverlap));
+win = sqrt(hamming(L));
+[X,F,T] = stft(ECG_noisy,Fs,'Window',win,'OverlapLength',noverlap,'FFTLength',K,'FrequencyRange','onesided');
+[D,F,T] = stft(ECG_clean,Fs,'Window',win,'OverlapLength',noverlap,'FFTLength',K,'FrequencyRange','onesided');
+[~,LL] = size(X);
+%% rls
+s_est=zeros(1,LENGTH);
+tic
+for k=1:K/2 +1
+    
+    for l=1:LL
+        
+%         P=(lamda^-1)*P-(lamda^-2)*(P*conj(X(k,l))*X(k,l).'*P)./(1+(lamda^-1)*X(k,l).'*P*conj(X(k,l)));
+%         theta=theta+conj(X(k,l))*D(k,l);
+%         wk=P*theta;
+%         ss_est(k,l)=wk*X(k,l);
+         delta=0.001;
+         theta=0;
+         P=1./delta;
+         lamda=0.9999;
+         wk=0;
+        for i=1:100
+          z=P*conj(X(k,l));
+          g=1/(lamda+X(k,l).'*z)*z;
+          alpha=D(k,l)-wk.'*X(k,l);
+          wk=wk+alpha*g;
+          P=1./lamda*(P-g*z');
+        end
+        ss_est(k,l)=wk*X(k,l);
+    end
+   
+end
+toc
+for indFr=1:LL
+        indices = (indFr-1)*noverlap+1:(indFr-1)*noverlap+L; 
+         res_sig = [ss_est(:,indFr); conj(flipud(ss_est(2: end - 1,indFr)))];
+        y_frame = real(ifft(res_sig));
+        y_frame = y_frame(1:L);
+        s_est(indices) = s_est(indices) + (y_frame.* win)'; 
+end
+s_est=ECG_normalize(s_est);
+
+figure(3)
+plot(index,s_est)
+title('RLS-ECG')
+xlabel('samples index')
+ylabel('Amplitude(mV)')
+snr_filterd=snr(ECG_clean,s_est-ECG_clean)
+isnr= snr_filterd-snr_pre
+err = immse(ECG_clean,s_est)
+
+
+figure(4)
+spectrogram(ECG_clean,win,noverlap,K,Fs,'yaxis')
+title('spectrogram of the clean ECG')
+figure(5)
+spectrogram(s_est,win,noverlap,K,Fs,'yaxis')
+title('spectrogram of the estimated ECG')
+figure(6)
+spectrogram(ECG_noisy,win,noverlap,K,Fs,'yaxis')
+title('spectrogram of the noisy ECG')
+
