@@ -1,0 +1,4 @@
+function y= ECG_normalize(x)
+M=max(x);
+y=x./M;
+end
